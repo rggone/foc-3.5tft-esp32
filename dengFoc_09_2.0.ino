@@ -11,6 +11,7 @@ int Sensor_DIR=1;    //传感器方向
 int Motor_PP=7;    //电机极对数
 float target_angle = 0; // 用于存储目标角度
 bool stop_requested = false; // 停止标志
+//int freq=3;//频率放大倍数
 
 // 阻力检测相关变量
 float last_angle = 0;     // 上一次的角度值
@@ -21,8 +22,8 @@ const unsigned long stall_timeout = 50;  // 停滞超时时间(0.05秒)
 
 // 最大角度设置相关变量
 unsigned long stop_press_time = 0;  // stop按键按下时间
-const unsigned long set_max_angle_timeout = 10000;  // 设置最大角度需要按住的时间(10秒)
-const unsigned long reset_default_timeout = 12000;  // 恢复默认值需要按住的时间(13秒)
+const unsigned long set_max_angle_timeout = 8000;  // 设置最大角度需要按住的时间(10秒)
+const unsigned long reset_default_timeout = 10000;  // 恢复默认值需要按住的时间(13秒)
 const float DEFAULT_MAX_ANGLE = 300;  // 默认最大角度值
 float max_angle = DEFAULT_MAX_ANGLE;    // 最大角度值
 
@@ -33,6 +34,17 @@ struct ControlMessage {
   bool stop;
 } controlData;
 
+// 声音控制函数
+/*void playBeep() {
+    ledcWriteTone(0, 261.63);
+    ledcWriteTone(1, 261.63);
+    ledcWriteTone(2, 261.63);
+    delay(200);
+    ledcWriteTone(0, 0);
+    ledcWriteTone(1, 0);
+    ledcWriteTone(2, 0);
+}
+*/
 // EEPROM地址定义
 const int EEPROM_ADDR = 0;
 
@@ -56,7 +68,8 @@ void resetToDefault() {
   Serial.println("已恢复默认最大角度: 300");
 }
 
-// 数据接收回调函数
+
+                  // <<数据接收回调函数>>//
 void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int len) {
   memcpy(&controlData, data, sizeof(controlData));
   
@@ -69,11 +82,15 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int len) {
     // 检查是否达到恢复默认值的时间阈值
     unsigned long press_duration = millis() - stop_press_time;
     if (press_duration >= reset_default_timeout) {
+      //playBeep();  // 第一声
+         //delay(300);  // 等待第一声结束
+      //playBeep();  // 第二声
       resetToDefault();
       stop_press_time = 0;  // 重置计时器
     }
     // 检查是否达到设置最大角度的时间阈值
     else if (press_duration >= set_max_angle_timeout) {
+      //playBeep();
       max_angle = DFOC_M0_Angle();
       saveMaxAngle();
       Serial.printf("设置新的最大角度: %f\n", max_angle);
@@ -102,6 +119,28 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int len) {
   }
 }
 
+         //堵转检测阻力函数//
+void check_stall() {
+  if (!is_moving) return;
+  
+  float current_angle = DFOC_M0_Angle();
+  unsigned long current_time = millis();
+  
+  // 检查角度是否发生显著变化
+  if (abs(current_angle - last_angle) > angle_threshold) {
+    last_angle = current_angle;
+    last_change_time = current_time;
+  }
+  // 如果超过停滞时间没有显著变化
+  else if (current_time - last_change_time > stall_timeout) {
+    // 停止到当前位置
+    target_angle = current_angle;
+    is_moving = false;
+    stop_requested = true;
+    Serial.println("检测到阻力，电机停止！");
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   EEPROM.begin(16);  // 初始化EEPROM
@@ -126,27 +165,7 @@ void setup() {
   DFOC_alignSensor(Motor_PP,Sensor_DIR);
 }
 
-//检测阻力函数
-void check_stall() {
-  if (!is_moving) return;
-  
-  float current_angle = DFOC_M0_Angle();
-  unsigned long current_time = millis();
-  
-  // 检查角度是否发生显著变化
-  if (abs(current_angle - last_angle) > angle_threshold) {
-    last_angle = current_angle;
-    last_change_time = current_time;
-  }
-  // 如果超过停滞时间没有显著变化
-  else if (current_time - last_change_time > stall_timeout) {
-    // 停止到当前位置
-    target_angle = current_angle;
-    is_moving = false;
-    stop_requested = true;
-    Serial.println("检测到阻力，电机停止！");
-  }
-}
+
 
 int count=0;
 void loop() 
@@ -154,7 +173,7 @@ void loop()
   runFOC();
   
   //位置-速度-力（加入电流环后）
-  DFOC_M0_SET_ANGLE_PID(1,0,0,100000,10);//p, i, d, 谐波平滑渡 ，  最大速度
+  DFOC_M0_SET_ANGLE_PID(1,0,0,100000,20);//p, i, d, 谐波平滑渡 ，  最大速度
   DFOC_M0_SET_VEL_PID(0.02,1,0,100000,2);//p, i, d, 谐波平滑渡（最大了），最大电流
   DFOC_M0_SET_CURRENT_PID(5,200,0,100000);
   DFOC_M0_set_Velocity_Angle(target_angle); // 直接使用目标角度
